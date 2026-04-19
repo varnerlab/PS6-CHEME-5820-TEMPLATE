@@ -71,6 +71,8 @@ function _causal_attention_forward(ca::CausalAttention, X::AbstractArray{<:Real,
 
     # Flatten the time and batch axes so each projection can be done with one
     # matrix multiplication, then reshape back to `(d_model, T, B)`.
+    # Each column of `Xmat` is one token state. Multiplying by `WQ'`, `WK'`,
+    # and `WV'` applies the learned linear maps to every token in one shot.
     Xmat = reshape(X, d_model, T * B)
     Q = reshape(ca.WQ' * Xmat, d_model, T, B)
     K = reshape(ca.WK' * Xmat, d_model, T, B)
@@ -88,6 +90,7 @@ function _causal_attention_forward(ca::CausalAttention, X::AbstractArray{<:Real,
     # Every score matrix compares all query positions against all key positions
     # inside one head. Dividing by `sqrt(d_head)` keeps the logits from growing
     # too large as the head width increases.
+    # The result has shape `(query_position, key_position, folded_head_batch)`.
     scores = NNlib.batched_mul(permutedims(Qh, (2, 1, 3)), Kh) ./ sqrt(Float32(d_head))
 
     # Mask out future positions so token `t` cannot attend to anything after `t`.
@@ -95,10 +98,14 @@ function _causal_attention_forward(ca::CausalAttention, X::AbstractArray{<:Real,
     scores = scores .+ reshape(mask_TT, T, T, 1)
 
     # Softmax over keys turns each row of scores into attention probabilities.
+    # For a fixed query position, the probabilities across all key positions
+    # now sum to 1.
     weights = softmax(scores; dims = 2)
 
     # Use those probabilities to form a weighted combination of the value
     # vectors at each position.
+    # This keeps the query axis in the middle slot, so the output still lines
+    # up as "one updated vector per time step."
     out = NNlib.batched_mul(Vh, permutedims(weights, (2, 1, 3)))
 
     # Undo the earlier reshape/permutation so the heads are concatenated back

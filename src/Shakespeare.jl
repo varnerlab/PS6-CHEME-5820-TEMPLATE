@@ -89,10 +89,13 @@ sees `X[1:t, b]` and is asked to predict `Y[t, b]`.
 function sample_batch(data::AbstractVector{<:Integer}, batchsize::Int, ctx_len::Int;
                        rng::AbstractRNG = Random.default_rng())
     n = length(data)
+    # We need `ctx_len` input tokens plus one more token to serve as the final
+    # next-token target.
     @assert n > ctx_len "corpus is shorter than the requested context length"
     # Each start index defines one contiguous training window of length
     # `ctx_len + 1`: the first `ctx_len` tokens become inputs and the shifted
     # sequence becomes targets.
+    # The upper bound `n - ctx_len` guarantees that `data[s + ctx_len]` exists.
     starts = rand(rng, 1:(n - ctx_len), batchsize)
     X = Matrix{Int}(undef, ctx_len, batchsize)
     Y = Matrix{Int}(undef, ctx_len, batchsize)

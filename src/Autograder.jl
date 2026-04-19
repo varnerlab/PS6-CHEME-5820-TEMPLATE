@@ -1,4 +1,4 @@
-# Autograder.jl -- lightweight autograder for PS5: Autoencoders
+# Autograder.jl -- lightweight autograder for PS6: Transformers
 #
 # Rubric scale (manual discussion review is separate)
 #   0 = nothing runs
@@ -15,7 +15,8 @@ mutable struct Grader
                                   Tuple{String,String,Int,Int}}}
 end
 
-# Default constructor -- start with an empty results vector
+# Default constructor -- start with an empty results vector that will be filled
+# incrementally as notebook cells run.
 Grader() = Grader(NamedTuple{(:problem,:description,:earned,:total),
                                Tuple{String,String,Int,Int}}[])
 
@@ -75,7 +76,8 @@ function score!(g::Grader; discussion_ok::Bool=false)
     @printf("  %-22s  %8s  %s\n", "Problem", "Score", "Progress")
     println("─"^56)
 
-    # group results by problem label and print one row per problem
+    # Group results by problem label and print one row per problem so students
+    # can tell whether they are stuck on Task 1, 2, or 3.
     for p in unique(r.problem for r in g.results)
         rows   = filter(r -> r.problem == p, g.results)
         pe     = sum(r.earned for r in rows)               # earned for this problem

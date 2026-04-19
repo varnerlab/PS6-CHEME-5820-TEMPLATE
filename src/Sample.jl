@@ -21,7 +21,8 @@ function sample_next_token(logits::AbstractVector{Float32};
                             top_k::Union{Nothing, Int} = nothing,
                             rng::AbstractRNG = Random.default_rng())::Int
     # `temperature == 0` is the deterministic limit of sampling: always choose
-    # the most likely token.
+    # the most likely token. `argmax` returns the token id directly because
+    # Julia arrays are 1-based and the vocabulary ids are too.
     if temperature == 0
         return argmax(logits)
     end
@@ -65,7 +66,8 @@ function generate(model::NanoGPT, prompt_ids::AbstractVector{<:Integer},
 
     for _ in 1:n_new_tokens
         # The model can only attend across `ctx_len` positions, so generation
-        # always feeds it the most recent window of tokens.
+        # always feeds it the most recent window of tokens. This sliding window
+        # is what lets a fixed-context model generate arbitrarily long text.
         window_start = max(1, length(ids) - ctx + 1)
         window = ids[window_start:end]
         T = length(window)
@@ -76,6 +78,7 @@ function generate(model::NanoGPT, prompt_ids::AbstractVector{<:Integer},
         logits = model(X)
 
         # Only the last position predicts the next unseen token to append.
+        # Earlier positions predict targets that are already in the prompt.
         last_logits = vec(logits[:, end, 1])
 
         next_id = sample_next_token(last_logits; temperature = temperature,

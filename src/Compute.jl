@@ -76,6 +76,8 @@ function load_and_encode(path::AbstractString, enc;
                          max_chars::Union{Nothing, Int} = nothing)::Vector{Int}
     text = read(path, String)
     if max_chars !== nothing && length(text) > max_chars
+        # Trim before tokenization so expensive BPE work only sees the prefix we
+        # intend to train on.
         text = text[1:max_chars]
     end
     return encode_corpus(text, enc)
@@ -139,22 +141,32 @@ function train_nanogpt!(model::NanoGPT,
     end
 
     opt_state = Flux.setup(AdamW(cfg.lr), model)
+    # Use the first 5% of training for warmup. With small transformers this is
+    # usually enough to avoid unstable early updates without complicating the schedule.
     warmup = max(1, cfg.n_steps ÷ 20)
 
     for step in start_step:cfg.n_steps
+        # Update the optimizer's learning rate every step so the warmup/cosine
+        # schedule is applied continuously across the whole run.
         lr_step = cosine_lr(step, warmup, cfg.n_steps, cfg.lr)
         Flux.adjust!(opt_state, lr_step)
 
+        # Draw one random minibatch of contiguous token windows and backpropagate
+        # the next-token prediction loss through that batch.
         X, Y = sample_batch(data, cfg.batch_size, cfg.ctx_len; rng = rng)
         loss, grads = Flux.withgradient(model) do m
             nanogpt_loss(m, X, Y)
         end
+        # `grads[1]` is the gradient with respect to the first argument of the
+        # closure above, namely the model itself.
         Flux.update!(opt_state, model, grads[1])
         push!(losses, loss)
 
         if step == start_step || step == cfg.n_steps || step % log_every == 0
             msg = @sprintf("  step %5d | lr = %.2e | train loss = %.4f", step, lr_step, loss)
             if val_data !== nothing
+                # Validation uses fresh random windows so the estimate is noisy
+                # but representative without scanning the full dataset.
                 vloss = validation_loss(model, val_data, cfg.batch_size, cfg.ctx_len; n_batches=4, rng=rng)
                 msg *= @sprintf(" | val loss = %.4f", vloss)
             end
@@ -162,6 +174,8 @@ function train_nanogpt!(model::NanoGPT,
         end
 
         if checkpoint_path !== nothing && (step % checkpoint_every == 0 || step == cfg.n_steps)
+            # Save the running loss curve too so resumed runs can plot a single
+            # continuous history rather than restarting the trace from zero.
             save_checkpoint(checkpoint_path, model;
                              meta = Dict(:step => step), losses = losses)
         end
@@ -182,6 +196,7 @@ function validation_loss(model::NanoGPT,
                           rng::AbstractRNG = Random.default_rng())::Float32
     total = 0.0f0
     for _ in 1:n_batches
+        # Reuse the same batching logic as training, but do not take gradients.
         X, Y = sample_batch(data, batchsize, ctx_len; rng = rng)
         total += nanogpt_loss(model, X, Y)
     end
@@ -276,6 +291,8 @@ weights so the model can be rebuilt identically.
 function save_checkpoint(path::AbstractString, model::NanoGPT;
                           meta::AbstractDict = Dict{Symbol, Any}(),
                           losses::AbstractVector{<:Real} = Float32[])
+    # `Flux.state(model)` walks the layer tree and extracts only the trainable
+    # arrays and buffers needed to rebuild this exact parameter state.
     jldsave(path;
         model_state = Flux.state(model),
         meta = Dict(meta),
@@ -291,6 +308,8 @@ matching shape. Returns the mutated model alongside the saved metadata and the
 training-loss history.
 """
 function load_checkpoint(path::AbstractString, model::NanoGPT)
+    # The caller is responsible for constructing `model` with the same shape as
+    # the saved checkpoint. `Flux.loadmodel!` then copies the stored arrays in.
     f = jldopen(path, "r")
     Flux.loadmodel!(model, f["model_state"])
     meta = haskey(f, "meta") ? f["meta"] : Dict{Symbol, Any}()
@@ -318,7 +337,8 @@ function collect_attention_weights(model::NanoGPT,
     @assert T <= model.ctx_len "T=$T exceeds model ctx_len=$(model.ctx_len)"
     d_model = size(model.tok_emb, 1)
 
-    # token + positional embedding (same layout as NanoGPT forward) -
+    # Recreate the exact embedding path used in `NanoGPT(::)(X_ids)` so the
+    # attention maps correspond to the same hidden states the model really sees.
     flat_ids = vec(X_ids)
     tok_e = model.tok_emb[:, flat_ids]
     H = reshape(tok_e, d_model, T, B)
@@ -327,9 +347,12 @@ function collect_attention_weights(model::NanoGPT,
 
     out = Vector{Array{Float32, 4}}(undef, length(model.blocks))
     for (l, block) in enumerate(model.blocks)
-        # record attention weights at this layer, then advance H through the block
+        # Attention is computed from the normalized hidden state because this is
+        # a pre-LayerNorm transformer.
         normed = block.ln1(H)
         out[l] = causal_attention_weights(block.attn, normed)
+        # Then manually advance the residual block so the next layer sees the
+        # same activations it would have seen in a real forward pass.
         Y = H .+ block.attn(normed)
         Z = Y .+ block.ffn(block.ln2(Y))
         H = Z

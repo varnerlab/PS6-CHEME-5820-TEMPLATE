@@ -54,6 +54,8 @@ end
 function (m::NanoGPT)(X_ids::AbstractMatrix{<:Integer})
     T, B = size(X_ids)
     @assert T <= m.ctx_len "input sequence length T=$T exceeds model context length $(m.ctx_len)"
+    # We read `d_model` once here because the same hidden width controls every
+    # reshape in the embedding and decoder stack.
     d_model = size(m.tok_emb, 1)
 
     # Token ids arrive as a (time, batch) matrix. Column lookup on `tok_emb`
@@ -62,6 +64,8 @@ function (m::NanoGPT)(X_ids::AbstractMatrix{<:Integer})
     flat_ids = vec(X_ids)
     tok_e = m.tok_emb[:, flat_ids]
     H = reshape(tok_e, d_model, T, B)
+    # From here on, `H[:, t, b]` means "the hidden state for time step `t` in
+    # batch element `b`."
 
     # Positional embeddings depend only on the time index, so the same
     # `(d_model, T)` slice is broadcast across every example in the batch.
@@ -95,6 +99,8 @@ function nanogpt_loss(model::NanoGPT,
     V, T, B = size(logits)
     # Flux expects examples along the second axis, so collapse time and batch
     # into one long list of supervised next-token predictions.
+    # Each column of the reshaped matrix is one "predict the next token here"
+    # training example.
     return Flux.logitcrossentropy(reshape(logits, V, T * B),
                                    Flux.onehotbatch(vec(Y_ids), 1:V))
 end

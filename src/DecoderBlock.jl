@@ -37,12 +37,16 @@ function DecoderBlock(d_model::Int, n_heads::Int, ctx_len::Int; d_ff::Int = 4 * 
         CausalAttention(d_model, n_heads, ctx_len),
         LayerNorm(d_model),
         # The same two-layer MLP is reused independently at every time step.
+        # It expands the hidden state to `d_ff`, applies a nonlinearity, then
+        # projects back to `d_model` so the residual addition is valid.
         Chain(Dense(d_model => d_ff, gelu), Dense(d_ff => d_model)),
     )
 end
 
 function (b::DecoderBlock)(X::AbstractArray{<:Real, 3})
     # Pre-norm transformer block:
+    # `ln1` and `ln2` stabilize the sublayer inputs, while the residual path
+    # preserves the old representation so each sublayer only has to learn an update.
     # 1. normalize, attend, and add the residual shortcut
     Y = X .+ b.attn(b.ln1(X))
     # 2. normalize again, apply the MLP, and add the second shortcut
