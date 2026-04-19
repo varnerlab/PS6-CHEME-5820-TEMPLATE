@@ -247,11 +247,28 @@ end
 # ────────────────────────────────────────────────────────────────────────────
 
 """
-URL of the instructor-trained reference checkpoint, hosted as a GitHub Release
-asset on the PS6 template repo. Edit this constant to match the actual release
-URL after publishing the release.
+URLs of the three instructor-trained checkpoints, hosted as GitHub Release
+assets on the PS6 template repo. Edit these constants to match the actual
+release URLs after publishing the release.
 """
-const REFERENCE_CHECKPOINT_URL = "https://github.com/varnerlab/PS6-CHEME-5820-TEMPLATE/releases/download/v1.0-s2026/reference_checkpoint.jld2"
+const REFERENCE_CHECKPOINT_URL  = "https://github.com/varnerlab/PS6-CHEME-5820-TEMPLATE/releases/download/v1.0-s2026/reference_checkpoint.jld2"
+const TASK1_CHECKPOINT_URL      = "https://github.com/varnerlab/PS6-CHEME-5820-TEMPLATE/releases/download/v1.0-s2026/task1_bpe_model.jld2"
+const TASK2_TINY_CHECKPOINT_URL = "https://github.com/varnerlab/PS6-CHEME-5820-TEMPLATE/releases/download/v1.0-s2026/task2_tiny_model.jld2"
+
+# Shared downloader so the three fetch_*_checkpoint helpers agree on directory
+# creation, timeout, logging, and "already present" semantics.
+function _fetch_release_asset(path::AbstractString, url::AbstractString, label::AbstractString, force::Bool)::String
+    if isfile(path) && !force
+        @info "$label already present; skipping download." path=path size_mb=round(filesize(path) / 2^20; digits=1)
+        return path
+    end
+    !isdir(dirname(path)) && mkpath(dirname(path))
+    @info "Downloading $label..." url=url target=path
+    t0 = time()
+    Downloads.download(url, path; timeout = 600.0)
+    @info "$label download complete" path=path size_mb=round(filesize(path) / 2^20; digits=1) elapsed_s=round(time() - t0; digits=1)
+    return path
+end
 
 """
     fetch_reference_checkpoint(path = joinpath(_PATH_TO_DATA, "reference_checkpoint.jld2");
@@ -265,16 +282,33 @@ existing path is returned.
 function fetch_reference_checkpoint(path::AbstractString = joinpath(_PATH_TO_DATA, "reference_checkpoint.jld2");
                                      url::AbstractString = REFERENCE_CHECKPOINT_URL,
                                      force::Bool = false)::String
-    if isfile(path) && !force
-        @info "Reference checkpoint already present; skipping download." path=path size_mb=round(filesize(path) / 2^20; digits=1)
-        return path
-    end
-    !isdir(dirname(path)) && mkpath(dirname(path))
-    @info "Downloading reference checkpoint..." url=url target=path
-    t0 = time()
-    Downloads.download(url, path; timeout = 600.0)
-    @info "Download complete" path=path size_mb=round(filesize(path) / 2^20; digits=1) elapsed_s=round(time() - t0; digits=1)
-    return path
+    return _fetch_release_asset(path, url, "Reference checkpoint", force)
+end
+
+"""
+    fetch_task1_checkpoint(path = joinpath(_PATH_TO_DATA, "task1_bpe_model.jld2");
+                            url = TASK1_CHECKPOINT_URL, force = false) -> String
+
+Download the instructor-trained Task 1 BPE Shakespeare checkpoint from the
+course GitHub Release. Same semantics as `fetch_reference_checkpoint`.
+"""
+function fetch_task1_checkpoint(path::AbstractString = joinpath(_PATH_TO_DATA, "task1_bpe_model.jld2");
+                                 url::AbstractString = TASK1_CHECKPOINT_URL,
+                                 force::Bool = false)::String
+    return _fetch_release_asset(path, url, "Task 1 checkpoint", force)
+end
+
+"""
+    fetch_task2_tiny_checkpoint(path = joinpath(_PATH_TO_DATA, "task2_tiny_model.jld2");
+                                 url = TASK2_TINY_CHECKPOINT_URL, force = false) -> String
+
+Download the instructor-trained Task 2 tiny TinyStories checkpoint from the
+course GitHub Release. Same semantics as `fetch_reference_checkpoint`.
+"""
+function fetch_task2_tiny_checkpoint(path::AbstractString = joinpath(_PATH_TO_DATA, "task2_tiny_model.jld2");
+                                      url::AbstractString = TASK2_TINY_CHECKPOINT_URL,
+                                      force::Bool = false)::String
+    return _fetch_release_asset(path, url, "Task 2 tiny checkpoint", force)
 end
 
 # ────────────────────────────────────────────────────────────────────────────
