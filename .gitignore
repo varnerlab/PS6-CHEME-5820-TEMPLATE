@@ -42,3 +42,6 @@ data/
 rules.md
 CLAUDE.md
 
+# Jupyter auto-save backups: regenerated on every save, no need to track.
+.ipynb_checkpoints/
+

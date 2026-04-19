@@ -345,13 +345,18 @@ vertical axis and heads on the horizontal axis.
 """
 function plot_induction_heatmap(scores::AbstractMatrix; title::AbstractString = "Induction scores")
     n_layers, n_heads = size(scores)
+    # autoscale to the top score: with small checkpoints the induction signal
+    # is well under 1, so a fixed clims = (0, 1) collapses every cell to the
+    # same dark color and hides the per-head structure.
+    vmax = max(maximum(scores), eps(Float32))
     return heatmap(1:n_heads, 1:n_layers, scores;
         xlabel = "head", ylabel = "layer",
         xticks = 1:n_heads, yticks = 1:n_layers,
         yflip = true,
-        color = :viridis, clims = (0, 1),
-        title = title, size = (520, 360),
-        titlefontsize = 10, framestyle = :box)
+        color = :viridis, clims = (0, vmax),
+        title = title, size = (560, 360),
+        titlefontsize = 10, framestyle = :box,
+        right_margin = 8Plots.mm)
 end
 
 """
